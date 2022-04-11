@@ -2,7 +2,6 @@
 
 
 import csv
-import glob
 import json
 import os
 import textwrap
@@ -156,20 +155,20 @@ _PAN_X_LANG = [
 
 _NAMES = ["XNLI", "tydiqa", "SQuAD"]
 for lang in _PAN_X_LANG:
-    _NAMES.append("PAN-X.{}".format(lang))
+    _NAMES.append(f"PAN-X.{lang}")
 for lang1 in _MLQA_LANG:
     for lang2 in _MLQA_LANG:
-        _NAMES.append("MLQA.{}.{}".format(lang1, lang2))
+        _NAMES.append(f"MLQA.{lang1}.{lang2}")
 for lang in _XQUAD_LANG:
-    _NAMES.append("XQuAD.{}".format(lang))
+    _NAMES.append(f"XQuAD.{lang}")
 for lang in _BUCC_LANG:
-    _NAMES.append("bucc18.{}".format(lang))
+    _NAMES.append(f"bucc18.{lang}")
 for lang in _PAWSX_LANG:
-    _NAMES.append("PAWS-X.{}".format(lang))
+    _NAMES.append(f"PAWS-X.{lang}")
 for lang in _TATOEBA_LANG:
-    _NAMES.append("tatoeba.{}".format(lang))
+    _NAMES.append(f"tatoeba.{lang}")
 for lang in _UD_POS_LANG:
-    _NAMES.append("udpos.{}".format(lang))
+    _NAMES.append(f"udpos.{lang}")
 
 _DESCRIPTIONS = {
     "tydiqa": textwrap.dedent(
@@ -405,7 +404,7 @@ _DATA_URLS = {
     "MLQA": "https://dl.fbaipublicfiles.com/MLQA/MLQA_V1.zip",
     "PAWS-X": "https://storage.googleapis.com/paws/pawsx/x-final.tar.gz",
     "bucc18": "https://comparable.limsi.fr/bucc2018/",
-    "tatoeba": "https://github.com/facebookresearch/LASER/raw/master/data/tatoeba/v1",
+    "tatoeba": "https://github.com/facebookresearch/LASER/raw/main/data/tatoeba/v1/",
     "udpos": "https://lindat.mff.cuni.cz/repository/xmlui/bitstream/handle/11234/1-3105/ud-treebanks-v2.5.tgz",
     "SQuAD": "https://rajpurkar.github.io/SQuAD-explorer/dataset/",
     "PAN-X": "https://s3.amazonaws.com/datasets.huggingface.co/wikiann/1.1.0/panx_dataset.zip",
@@ -418,7 +417,7 @@ _URLS = {
     "MLQA": "https://github.com/facebookresearch/MLQA",
     "PAWS-X": "https://github.com/google-research-datasets/paws/tree/master/pawsx",
     "bucc18": "https://comparable.limsi.fr/bucc2018/",
-    "tatoeba": "https://github.com/facebookresearch/LASER/blob/master/data/tatoeba/v1/README.md",
+    "tatoeba": "https://github.com/facebookresearch/LASER/blob/main/data/tatoeba/v1/README.md",
     "udpos": "https://universaldependencies.org/",
     "SQuAD": "https://rajpurkar.github.io/SQuAD-explorer/",
     "PAN-X": "https://github.com/afshinrahimi/mmner",
@@ -462,7 +461,6 @@ class Xtreme(datasets.GeneratorBasedBuilder):
     ]
 
     def _info(self):
-        # TODO(xtreme): Specifies the datasets.DatasetInfo object
         features = {text_feature: datasets.Value("string") for text_feature in self.config.text_features.keys()}
         if "answers" in features.keys():
             features["answers"] = datasets.features.Sequence(
@@ -472,60 +470,13 @@ class Xtreme(datasets.GeneratorBasedBuilder):
                 }
             )
         if self.config.name.startswith("PAWS-X"):
-            features["label"] = datasets.Value("string")
-        if self.config.name == "XNLI":
+            features = PawsxParser.features
+        elif self.config.name == "XNLI":
             features["gold_label"] = datasets.Value("string")
-
-        if self.config.name.startswith("udpos"):
-            features = datasets.Features(
-                {
-                    "tokens": datasets.Sequence(datasets.Value("string")),
-                    "pos_tags": datasets.Sequence(
-                        datasets.features.ClassLabel(
-                            names=[
-                                "ADJ",
-                                "ADP",
-                                "ADV",
-                                "AUX",
-                                "CCONJ",
-                                "DET",
-                                "INTJ",
-                                "NOUN",
-                                "NUM",
-                                "PART",
-                                "PRON",
-                                "PROPN",
-                                "PUNCT",
-                                "SCONJ",
-                                "SYM",
-                                "VERB",
-                                "X",
-                            ]
-                        )
-                    ),
-                }
-            )
-
-        if self.config.name.startswith("PAN-X"):
-            features = datasets.Features(
-                {
-                    "tokens": datasets.Sequence(datasets.Value("string")),
-                    "ner_tags": datasets.Sequence(
-                        datasets.features.ClassLabel(
-                            names=[
-                                "O",
-                                "B-PER",
-                                "I-PER",
-                                "B-ORG",
-                                "I-ORG",
-                                "B-LOC",
-                                "I-LOC",
-                            ]
-                        )
-                    ),
-                    "langs": datasets.Sequence(datasets.Value("string")),
-                }
-            )
+        elif self.config.name.startswith("udpos"):
+            features = UdposParser.features
+        elif self.config.name.startswith("PAN-X"):
+            features = PanxParser.features
         return datasets.DatasetInfo(
             # This is the description that will appear on the datasets page.
             description=self.config.description + "\n" + _DESCRIPTION,
@@ -545,16 +496,12 @@ class Xtreme(datasets.GeneratorBasedBuilder):
 
     def _split_generators(self, dl_manager):
         """Returns SplitGenerators."""
-        # TODO(xtreme): Downloads the data and defines the splits
-        # dl_manager is a datasets.download.DownloadManager that can be used to
-        # download and extract URLs
-
         if self.config.name == "tydiqa":
             train_url = "v1.1/tydiqa-goldp-v1.1-train.json"
             dev_url = "v1.1/tydiqa-goldp-v1.1-dev.json"
             urls_to_download = {
-                "train": os.path.join(self.config.data_url, train_url),
-                "dev": os.path.join(self.config.data_url, dev_url),
+                "train": self.config.data_url + train_url,
+                "dev": self.config.data_url + dev_url,
             }
             dl_dir = dl_manager.download_and_extract(urls_to_download)
             return [
@@ -594,7 +541,7 @@ class Xtreme(datasets.GeneratorBasedBuilder):
                     gen_kwargs={
                         "filepath": os.path.join(
                             os.path.join(mlqa_downloaded_files, "MLQA_V1/test"),
-                            "test-context-{}-question-{}.json".format(l1, l2),
+                            f"test-context-{l1}-question-{l2}.json",
                         )
                     },
                 ),
@@ -604,7 +551,7 @@ class Xtreme(datasets.GeneratorBasedBuilder):
                     gen_kwargs={
                         "filepath": os.path.join(
                             os.path.join(mlqa_downloaded_files, "MLQA_V1/dev"),
-                            "dev-context-{}-question-{}.json".format(l1, l2),
+                            f"dev-context-{l1}-question-{l2}.json",
                         )
                     },
                 ),
@@ -612,9 +559,7 @@ class Xtreme(datasets.GeneratorBasedBuilder):
 
         if self.config.name.startswith("XQuAD"):
             lang = self.config.name.split(".")[1]
-            xquad_downloaded_file = dl_manager.download_and_extract(
-                os.path.join(self.config.data_url, "xquad.{}.json".format(lang))
-            )
+            xquad_downloaded_file = dl_manager.download_and_extract(self.config.data_url + f"xquad.{lang}.json")
             return [
                 datasets.SplitGenerator(
                     name=datasets.Split.VALIDATION,
@@ -623,39 +568,12 @@ class Xtreme(datasets.GeneratorBasedBuilder):
                 ),
             ]
         if self.config.name.startswith("PAWS-X"):
-            lang = self.config.name.split(".")[1]
-            paws_x_dir = dl_manager.download_and_extract(self.config.data_url)
-            data_dir = os.path.join(paws_x_dir, "x-final", lang)
-            return [
-                datasets.SplitGenerator(
-                    name=datasets.Split.VALIDATION,
-                    # These kwargs will be passed to _generate_examples
-                    gen_kwargs={"filepath": os.path.join(data_dir, "dev_2k.tsv")},
-                ),
-                datasets.SplitGenerator(
-                    name=datasets.Split.TEST,
-                    # These kwargs will be passed to _generate_examples
-                    gen_kwargs={"filepath": os.path.join(data_dir, "test_2k.tsv")},
-                ),
-                datasets.SplitGenerator(
-                    name=datasets.Split.TRAIN,
-                    # These kwargs will be passed to _generate_examples
-                    gen_kwargs={
-                        "filepath": os.path.join(data_dir, "translated_train.tsv")
-                        if lang != "en"
-                        else os.path.join(data_dir, "train.tsv")
-                    },
-                ),
-            ]
+            return PawsxParser.split_generators(dl_manager=dl_manager, config=self.config)
         elif self.config.name.startswith("tatoeba"):
             lang = self.config.name.split(".")[1]
 
-            tatoeba_source_data = dl_manager.download_and_extract(
-                os.path.join(self.config.data_url, "tatoeba.{}-eng.{}".format(lang, lang))
-            )
-            tatoeba_eng_data = dl_manager.download_and_extract(
-                os.path.join(self.config.data_url, "tatoeba.{}-eng.eng".format(lang))
-            )
+            tatoeba_source_data = dl_manager.download_and_extract(self.config.data_url + f"tatoeba.{lang}-eng.{lang}")
+            tatoeba_eng_data = dl_manager.download_and_extract(self.config.data_url + f"tatoeba.{lang}-eng.eng")
             return [
                 datasets.SplitGenerator(
                     name=datasets.Split.VALIDATION,
@@ -665,126 +583,30 @@ class Xtreme(datasets.GeneratorBasedBuilder):
             ]
         if self.config.name.startswith("bucc18"):
             lang = self.config.name.split(".")[1]
-            bucc18_dl_test_dir = dl_manager.download_and_extract(
-                os.path.join(
-                    self.config.data_url,
-                    "bucc2018-{}-en.training-gold.tar.bz2".format(lang),
-                )
+            bucc18_dl_test_archive = dl_manager.download(
+                self.config.data_url + f"bucc2018-{lang}-en.training-gold.tar.bz2"
             )
-            bucc18_dl_dev_dir = dl_manager.download_and_extract(
-                os.path.join(
-                    self.config.data_url,
-                    "bucc2018-{}-en.sample-gold.tar.bz2".format(lang),
-                )
+            bucc18_dl_dev_archive = dl_manager.download(
+                self.config.data_url + f"bucc2018-{lang}-en.sample-gold.tar.bz2"
             )
             return [
                 datasets.SplitGenerator(
                     name=datasets.Split.VALIDATION,
-                    # These kwargs will be passed to _generate_examples
-                    gen_kwargs={"filepath": os.path.join(bucc18_dl_dev_dir, "bucc2018", lang + "-en")},
+                    gen_kwargs={"filepath": dl_manager.iter_archive(bucc18_dl_dev_archive)},
                 ),
                 datasets.SplitGenerator(
                     name=datasets.Split.TEST,
-                    # These kwargs will be passed to _generate_examples
-                    gen_kwargs={"filepath": os.path.join(bucc18_dl_test_dir, "bucc2018", lang + "-en")},
+                    gen_kwargs={"filepath": dl_manager.iter_archive(bucc18_dl_test_archive)},
                 ),
             ]
         if self.config.name.startswith("udpos"):
-            udpos_downloaded_files = dl_manager.download_and_extract(self.config.data_url)
-            data_dir = os.path.join(udpos_downloaded_files, "ud-treebanks-v2.5")
-
-            lang = self.config.name.split(".")[1]
-            data_dir = os.path.join(data_dir, "*_" + lang + "*")
-            folders = sorted(glob.glob(data_dir))
-
-            if lang == "Kazakh":
-                return [
-                    datasets.SplitGenerator(
-                        name=datasets.Split.TEST,
-                        # These kwargs will be passed to _generate_examples
-                        gen_kwargs={
-                            "filepath": [
-                                os.path.join(folder, file)
-                                for folder in folders
-                                for file in sorted(os.listdir(folder))
-                                if "test" in file and file.endswith(".conllu")
-                            ]
-                        },
-                    ),
-                    datasets.SplitGenerator(
-                        name=datasets.Split.TRAIN,
-                        # These kwargs will be passed to _generate_examples
-                        gen_kwargs={
-                            "filepath": [
-                                os.path.join(folder, file)
-                                for folder in folders
-                                for file in sorted(os.listdir(folder))
-                                if "train" in file and file.endswith(".conllu")
-                            ]
-                        },
-                    ),
-                ]
-            elif lang == "Tagalog" or lang == "Thai" or lang == "Yoruba":
-                return [
-                    datasets.SplitGenerator(
-                        name=datasets.Split.TEST,
-                        # These kwargs will be passed to _generate_examples
-                        gen_kwargs={
-                            "filepath": [
-                                os.path.join(folder, file)
-                                for folder in folders
-                                for file in sorted(os.listdir(folder))
-                                if "test" in file and file.endswith(".conllu")
-                            ]
-                        },
-                    )
-                ]
-            else:
-                return [
-                    # We exclude Arabic-NYUAD which does not contains any words, only _
-                    datasets.SplitGenerator(
-                        name=datasets.Split.VALIDATION,
-                        # These kwargs will be passed to _generate_examples
-                        gen_kwargs={
-                            "filepath": [
-                                os.path.join(folder, file)
-                                for folder in folders
-                                for file in sorted(os.listdir(folder))
-                                if "NYUAD" not in folder and "dev" in file and file.endswith(".conllu")
-                            ]
-                        },
-                    ),
-                    datasets.SplitGenerator(
-                        name=datasets.Split.TEST,
-                        # These kwargs will be passed to _generate_examples
-                        gen_kwargs={
-                            "filepath": [
-                                os.path.join(folder, file)
-                                for folder in folders
-                                for file in sorted(os.listdir(folder))
-                                if "NYUAD" not in folder and "test" in file and file.endswith(".conllu")
-                            ]
-                        },
-                    ),
-                    datasets.SplitGenerator(
-                        name=datasets.Split.TRAIN,
-                        # These kwargs will be passed to _generate_examples
-                        gen_kwargs={
-                            "filepath": [
-                                os.path.join(folder, file)
-                                for folder in folders
-                                for file in sorted(os.listdir(folder))
-                                if "NYUAD" not in folder and "train" in file and file.endswith(".conllu")
-                            ]
-                        },
-                    ),
-                ]
+            return UdposParser.split_generators(dl_manager=dl_manager, config=self.config)
 
         if self.config.name == "SQuAD":
 
             urls_to_download = {
-                "train": os.path.join(self.config.data_url, "train-v1.1.json"),
-                "dev": os.path.join(self.config.data_url, "dev-v1.1.json"),
+                "train": self.config.data_url + "train-v1.1.json",
+                "dev": self.config.data_url + "dev-v1.1.json",
             }
             downloaded_files = dl_manager.download_and_extract(urls_to_download)
 
@@ -800,29 +622,9 @@ class Xtreme(datasets.GeneratorBasedBuilder):
             ]
 
         if self.config.name.startswith("PAN-X"):
-            panx_dl_dir = dl_manager.download_and_extract(self.config.data_url)
-            lang = self.config.name.split(".")[1]
-            lang_folder = dl_manager.extract(os.path.join(panx_dl_dir, lang + ".tar.gz"))
+            return PanxParser.split_generators(dl_manager=dl_manager, config=self.config)
 
-            return [
-                datasets.SplitGenerator(
-                    name=datasets.Split.VALIDATION,
-                    # These kwargs will be passed to _generate_examples
-                    gen_kwargs={"filepath": os.path.join(lang_folder, "dev")},
-                ),
-                datasets.SplitGenerator(
-                    name=datasets.Split.TEST,
-                    # These kwargs will be passed to _generate_examples
-                    gen_kwargs={"filepath": os.path.join(lang_folder, "test")},
-                ),
-                datasets.SplitGenerator(
-                    name=datasets.Split.TRAIN,
-                    # These kwargs will be passed to _generate_examples
-                    gen_kwargs={"filepath": os.path.join(lang_folder, "train")},
-                ),
-            ]
-
-    def _generate_examples(self, filepath):
+    def _generate_examples(self, filepath=None, **kwargs):
         """Yields examples."""
         # TODO(xtreme): Yields (key, example) tuples from the dataset
 
@@ -863,16 +665,7 @@ class Xtreme(datasets.GeneratorBasedBuilder):
                         "gold_label": row["gold_label"],
                     }
         if self.config.name.startswith("PAWS-X"):
-            with open(filepath, encoding="utf-8") as f:
-                data = csv.reader(f, delimiter="\t")
-                next(data)  # skip header
-                for id_, row in enumerate(data):
-                    if len(row) == 4:
-                        yield id_, {
-                            "sentence1": row[1],
-                            "sentence2": row[2],
-                            "label": row[3],
-                        }
+            yield from PawsxParser.generate_examples(config=self.config, filepath=filepath, **kwargs)
         if self.config.name.startswith("XQuAD"):
             with open(filepath, encoding="utf-8") as f:
                 xquad = json.load(f)
@@ -898,26 +691,17 @@ class Xtreme(datasets.GeneratorBasedBuilder):
                                 },
                             }
         if self.config.name.startswith("bucc18"):
-            files = sorted(os.listdir(filepath))
-            target_file = "/"
-            source_file = "/"
-            source_target_file = "/"
-            for file in files:
-                if file.endswith("en"):
-                    target_file = os.path.join(filepath, file)
-                elif file.endswith("gold"):
-                    source_target_file = os.path.join(filepath, file)
-                else:
-                    source_file = os.path.join(filepath, file)
-            with open(target_file, encoding="utf-8") as f:
-                data = csv.reader(f, delimiter="\t")
-                target_sentences = [row for row in data]
-            with open(source_file, encoding="utf-8") as f:
-                data = csv.reader(f, delimiter="\t")
-                source_sentences = [row for row in data]
-            with open(source_target_file, encoding="utf-8") as f:
-                data = csv.reader(f, delimiter="\t")
-                source_target_ids = [row for row in data]
+            lang = self.config.name.split(".")[1]
+            data_dir = f"bucc2018/{lang}-en"
+            for path, file in filepath:
+                if path.startswith(data_dir):
+                    csv_content = [line.decode("utf-8") for line in file]
+                    if path.endswith("en"):
+                        target_sentences = list(csv.reader(csv_content, delimiter="\t"))
+                    elif path.endswith("gold"):
+                        source_target_ids = list(csv.reader(csv_content, delimiter="\t"))
+                    else:
+                        source_sentences = list(csv.reader(csv_content, delimiter="\t"))
             for id_, pair in enumerate(source_target_ids):
                 source_id = pair[0]
                 target_id = pair[1]
@@ -958,37 +742,72 @@ class Xtreme(datasets.GeneratorBasedBuilder):
                     "target_lang": "eng",
                 }
         if self.config.name.startswith("udpos"):
-            for id_file, file in enumerate(filepath):
-                with open(file, encoding="utf-8") as f:
-                    data = csv.reader(f, delimiter="\t", quoting=csv.QUOTE_NONE)
-                    tokens = []
-                    pos_tags = []
-                    for id_row, row in enumerate(data):
-                        if len(row) >= 10 and row[1] != "_" and row[3] != "_":
-                            tokens.append(row[1])
-                            pos_tags.append(row[3])
-                        if len(row) == 0 and len(tokens) > 0:
-                            yield str(id_file) + "_" + str(id_row), {
-                                "tokens": tokens,
-                                "pos_tags": pos_tags,
-                            }
-                            tokens = []
-                            pos_tags = []
+            yield from UdposParser.generate_examples(config=self.config, filepath=filepath, **kwargs)
         if self.config.name.startswith("PAN-X"):
-            guid_index = 1
-            with open(filepath, encoding="utf-8") as f:
+            yield from PanxParser.generate_examples(filepath=filepath, **kwargs)
+
+
+class PanxParser:
+
+    features = datasets.Features(
+        {
+            "tokens": datasets.Sequence(datasets.Value("string")),
+            "ner_tags": datasets.Sequence(
+                datasets.features.ClassLabel(
+                    names=[
+                        "O",
+                        "B-PER",
+                        "I-PER",
+                        "B-ORG",
+                        "I-ORG",
+                        "B-LOC",
+                        "I-LOC",
+                    ]
+                )
+            ),
+            "langs": datasets.Sequence(datasets.Value("string")),
+        }
+    )
+
+    @staticmethod
+    def split_generators(dl_manager=None, config=None):
+        data_dir = dl_manager.download_and_extract(config.data_url)
+        lang = config.name.split(".")[1]
+        archive = os.path.join(data_dir, lang + ".tar.gz")
+        split_filenames = {
+            datasets.Split.TRAIN: "train",
+            datasets.Split.VALIDATION: "dev",
+            datasets.Split.TEST: "test",
+        }
+        return [
+            datasets.SplitGenerator(
+                name=split,
+                gen_kwargs={
+                    "filepath": dl_manager.iter_archive(archive),
+                    "filename": split_filenames[split],
+                },
+            )
+            for split in split_filenames
+        ]
+
+    @staticmethod
+    def generate_examples(filepath=None, filename=None):
+        idx = 1
+        for path, file in filepath:
+            if path.endswith(filename):
                 tokens = []
                 ner_tags = []
                 langs = []
-                for line in f:
+                for line in file:
+                    line = line.decode("utf-8")
                     if line == "" or line == "\n":
                         if tokens:
-                            yield guid_index, {
+                            yield idx, {
                                 "tokens": tokens,
                                 "ner_tags": ner_tags,
                                 "langs": langs,
                             }
-                            guid_index += 1
+                            idx += 1
                             tokens = []
                             ner_tags = []
                             langs = []
@@ -1004,8 +823,131 @@ class Xtreme(datasets.GeneratorBasedBuilder):
                             # examples have no label in test set
                             ner_tags.append("O")
                 if tokens:
-                    yield guid_index, {
+                    yield idx, {
                         "tokens": tokens,
                         "ner_tags": ner_tags,
                         "langs": langs,
                     }
+
+
+class PawsxParser:
+
+    features = datasets.Features(
+        {
+            "sentence1": datasets.Value("string"),
+            "sentence2": datasets.Value("string"),
+            "label": datasets.Value("string"),
+        }
+    )
+
+    @staticmethod
+    def split_generators(dl_manager=None, config=None):
+        lang = config.name.split(".")[1]
+        archive = dl_manager.download(config.data_url)
+        split_filenames = {
+            datasets.Split.TRAIN: "translated_train.tsv" if lang != "en" else "train.tsv",
+            datasets.Split.VALIDATION: "dev_2k.tsv",
+            datasets.Split.TEST: "test_2k.tsv",
+        }
+        return [
+            datasets.SplitGenerator(
+                name=split,
+                gen_kwargs={"filepath": dl_manager.iter_archive(archive), "filename": split_filenames[split]},
+            )
+            for split in split_filenames
+        ]
+
+    @staticmethod
+    def generate_examples(config=None, filepath=None, filename=None):
+        lang = config.name.split(".")[1]
+        for path, file in filepath:
+            if f"/{lang}/" in path and path.endswith(filename):
+                lines = (line.decode("utf-8") for line in file)
+                data = csv.reader(lines, delimiter="\t")
+                next(data)  # skip header
+                for id_, row in enumerate(data):
+                    if len(row) == 4:
+                        yield id_, {
+                            "sentence1": row[1],
+                            "sentence2": row[2],
+                            "label": row[3],
+                        }
+
+
+class UdposParser:
+
+    features = datasets.Features(
+        {
+            "tokens": datasets.Sequence(datasets.Value("string")),
+            "pos_tags": datasets.Sequence(
+                datasets.features.ClassLabel(
+                    names=[
+                        "ADJ",
+                        "ADP",
+                        "ADV",
+                        "AUX",
+                        "CCONJ",
+                        "DET",
+                        "INTJ",
+                        "NOUN",
+                        "NUM",
+                        "PART",
+                        "PRON",
+                        "PROPN",
+                        "PUNCT",
+                        "SCONJ",
+                        "SYM",
+                        "VERB",
+                        "X",
+                    ]
+                )
+            ),
+        }
+    )
+
+    @staticmethod
+    def split_generators(dl_manager=None, config=None):
+        archive = dl_manager.download(config.data_url)
+        split_names = {datasets.Split.TRAIN: "train", datasets.Split.VALIDATION: "dev", datasets.Split.TEST: "test"}
+        split_generators = {
+            split: datasets.SplitGenerator(
+                name=split,
+                gen_kwargs={
+                    "filepath": dl_manager.iter_archive(archive),
+                    "split": split_names[split],
+                },
+            )
+            for split in split_names
+        }
+        lang = config.name.split(".")[1]
+        if lang in ["Tagalog", "Thai", "Yoruba"]:
+            return [split_generators["test"]]
+        elif lang == "Kazakh":
+            return [split_generators["train"], split_generators["test"]]
+        else:
+            return [split_generators["train"], split_generators["validation"], split_generators["test"]]
+
+    @staticmethod
+    def generate_examples(config=None, filepath=None, split=None):
+        lang = config.name.split(".")[1]
+        idx = 0
+        for path, file in filepath:
+            if f"_{lang}" in path and split in path and path.endswith(".conllu"):
+                # For lang other than [see below], we exclude Arabic-NYUAD which does not contains any words, only _
+                if lang in ["Kazakh", "Tagalog", "Thai", "Yoruba"] or "NYUAD" not in path:
+                    lines = (line.decode("utf-8") for line in file)
+                    data = csv.reader(lines, delimiter="\t", quoting=csv.QUOTE_NONE)
+                    tokens = []
+                    pos_tags = []
+                    for id_row, row in enumerate(data):
+                        if len(row) >= 10 and row[1] != "_" and row[3] != "_":
+                            tokens.append(row[1])
+                            pos_tags.append(row[3])
+                        if len(row) == 0 and len(tokens) > 0:
+                            yield idx, {
+                                "tokens": tokens,
+                                "pos_tags": pos_tags,
+                            }
+                            idx += 1
+                            tokens = []
+                            pos_tags = []
